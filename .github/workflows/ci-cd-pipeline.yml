@@ -1,0 +1,46 @@
+name: CI/CD Pipeline - FinTech Nova
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-security:
+    name: Seguridad, Pruebas y Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código (Checkout)
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Auditoría de seguridad con pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit --requirement requirements.txt --format=columns
+
+      - name: Ejecutar pruebas automáticas
+        run: pytest test_main.py -v --tb=short
+
+      - name: Construir imagen Docker
+        run: docker build -t fintech-nova:${{ github.sha }} .
+
+      - name: Verificar imagen Docker (Smoke Test)
+        run: |
+          docker run -d --name fintech-test -p 8000:8000 fintech-nova:${{ github.sha }}
+          sleep 5
+          curl --fail http://localhost:8000/status || (docker logs fintech-test && exit 1)
+          docker stop fintech-test && docker rm fintech-test

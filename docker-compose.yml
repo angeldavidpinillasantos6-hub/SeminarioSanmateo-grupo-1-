@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  api:
+    build: .
+    image: fintech-nova:1.0
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=production
+    volumes:
+      - ./data:/app/data
+      - ./Backups:/app/Backups
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+volumes:
+  redis-data:

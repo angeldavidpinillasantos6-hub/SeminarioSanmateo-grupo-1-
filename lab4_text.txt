@@ -1,0 +1,560 @@
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 1 de 21 
+ENTREGABLE — LABORATORIO 4 
+Despliegue Continuo (CI/CD) 
+con GitHub Actions — FinTech Nova 
+Fase 4 del Proyecto Final Integrador — Pase a Producción 
+ 
+Seminario Arquitecturas digitales seguras y automatizadas 
+Integrantes GRUPO 9  
+DAVID FELIPE TRIANA GONZALEZ 
+FRANK LEONARDO CARVAJAL ROJAS 
+JUAN FELIPE ESCOBAR FLOREZ 
+Repositorio https://github.com/dftrianag-code/SeminarioSanmateo 
+Fecha de entrega [23 / 06 / 2026] 
+ 
+1. Objetivo del Laboratorio 
+Garantizar que cualquier cambio futuro en el código del motor de evaluación de riesgo crediticio de 
+FinTech Nova sea validado automáticamente antes de llegar a producción. Esto se logra mediante 
+un pipeline de Integración y Despliegue Continuo (CI/CD) en GitHub Actions que, en cada push a 
+la rama main, descarga el código, instala las dependencias, ejecuta una auditoría de seguridad 
+sobre ellas, y construye la imagen Docker final únicamente si todo lo anterior es exitoso. 
+Este documento cubre los tres criterios de evaluación del Laboratorio 4: (1) el pipeline CI/CD 
+funcionando en verde, (2) el diagrama arquitectónico final actualizado, y (3) los puntos clave para 
+la sustentación técnica. Adicionalmente, incluye una demostración opcional (sección 3) donde se 
+provoca intencionalmente un fallo de seguridad para comprobar que el pipeline lo detecta y 
+bloquea automáticamente. 
+2. Pipeline de Integración y Despliegue Continuo 
+2.1 Disparador y Estructura 
+El pipeline se ubica en .github/workflows/ci-cd-pipeline.yml y se activa automáticamente con cada 
+push a la rama main (y también puede lanzarse manualmente con workflow_dispatch). Está 
+compuesto por un solo job (build-and-security) que ejecuta seis pasos en una máquina virtual 
+Ubuntu efímera: descarga del código, configuración de Python 3.11, instalación de dependencias, 
+auditoría de seguridad con pip-audit, ejecución de pruebas automáticas con pytest, construcción de 
+la imagen Docker, y una verificación final (smoke test) de que la imagen levanta correctamente. 
+2.2 Configuración Final del Workflow 
+name: CI/CD Pipeline - FinTech Nova 
+  
+on: 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 2 de 21 
+  push: 
+    branches: 
+      - main 
+  workflow_dispatch: 
+  
+jobs: 
+  build-and-security: 
+    name: Seguridad, Pruebas y Build 
+    runs-on: ubuntu-latest 
+    steps: 
+      - name: Descargar código (Checkout) 
+        uses: actions/checkout@v4 
+  
+      - name: Configurar Python 3.11 
+        uses: actions/setup-python@v5 
+        with: 
+          python-version: '3.11' 
+          cache: 'pip' 
+  
+      - name: Instalar dependencias 
+        working-directory: fintech-nova-api 
+        run: | 
+          python -m pip install --upgrade pip 
+          pip install -r requirements.txt -r requirements-dev.txt 
+  
+      - name: Auditoría de seguridad con pip-audit 
+        working-directory: fintech-nova-api 
+        run: | 
+          pip install pip-audit 
+          pip-audit --requirement requirements.txt --format=columns 
+  
+      - name: Ejecutar pruebas automáticas 
+        working-directory: fintech-nova-api 
+        run: pytest test_main.py -v --tb=short 
+  
+      - name: Construir imagen Docker 
+        run: docker build -t fintech-nova:${{ github.sha }} fintech-nova-api/ 
+  
+      - name: Verificar imagen Docker (Smoke Test) 
+        run: | 
+          docker run -d --name fintech-test -p 8000:8000 fintech-nova:${{ github.sha }} 
+          sleep 5 
+          curl --fail http://localhost:8000/status || (docker logs fintech-test && exit 1) 
+          docker stop fintech-test && docker rm fintech-test 
+ 
+2.3 Auditoría de Seguridad de Dependencias (pip-audit) 
+Como parte del enfoque DevSecOps (Shift-Left), el pipeline ejecuta pip-audit antes de construir la 
+imagen Docker. Esta herramienta compara cada dependencia del proyecto (fastapi, uvicorn, psutil, 
+pydantic) contra las bases de datos de vulnerabilidades OSV y NVD. Si se detecta una 
+vulnerabilidad conocida, el pipeline se detiene automáticamente y no se construye ninguna imagen, 
+evitando que código inseguro llegue a producción. 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 3 de 21 
+ 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 4 de 21 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 5 de 21 
+ 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 6 de 21 
+2.4 Pruebas Automáticas (pytest) 
+Se desarrolló una suite de pruebas (test_main.py) que valida la lógica de negocio del motor de 
+riesgo: el rechazo automático a menores de edad, la aprobación cuando el score (ingresos menos 
+deudas) supera el umbral, el estado 'En Revision' en casos intermedios, el rechazo de payloads 
+inválidos con código 422, y la consulta del historial financiero. El pipeline ejecuta esta suite 
+automáticamente antes de construir la imagen Docker; si alguna prueba falla, el build se detiene. 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 7 de 21 
+ 
+2.5 Verificación de la Imagen Docker (Smoke Test) 
+Una vez construida la imagen, el pipeline la ejecuta temporalmente y consulta el endpoint /status 
+mediante curl. Si la API no responde correctamente, el paso falla y se muestran los logs del 
+contenedor para diagnóstico. Esto confirma que la imagen no solo se construye, sino que 
+efectivamente arranca y sirve peticiones — un nivel de verificación adicional sobre la sola 
+construcción de la imagen. 
+ 
+2.6 Evidencia de Ejecución Exitosa (Indicador en Verde) 
+Tras corregir la configuración inicial del workflow, las siguientes ejecuciones (runs) del pipeline se 
+completaron exitosamente, mostrando el indicador verde en la pestaña Actions del repositorio. 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 8 de 21 
+ 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 9 de 21 
+ 
+ 
+3. Demo Opcional: DevSecOps en Acción (Shift-Left) 
+Para demostrar de forma tangible que el control de seguridad funciona, se realizó una prueba 
+controlada: se introdujo intencionalmente una dependencia con una vulnerabilidad conocida 
+(requests==2.6.0, asociada al CVE GHSA-j8r2-6x86-q33q) en requirements.txt y se subió al 
+repositorio. El objetivo era observar si el pipeline detectaba y bloqueaba el problema 
+automáticamente, sin intervención humana. 
+Resultado: el paso de pip-audit falló inmediatamente con código de salida distinto de cero, y 
+GitHub Actions detuvo el pipeline antes de llegar a las pruebas, la construcción de la imagen 
+Docker y el smoke test. Ningún código vulnerable llegó a empaquetarse. Posteriormente se 
+restauró la versión segura de la dependencia y se confirmó que el pipeline volvió a completarse 
+exitosamente. 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 10 de 21 
+ 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 11 de 21 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 12 de 21 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 13 de 21 
+ 
+ 
+ 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 14 de 21 
+ 
+Esta prueba demuestra en la práctica el principio de Shift-Left: la vulnerabilidad fue detectada 
+antes de llegar a producción, el sistema actuó como un guardián automático que ningún 
+desarrollador puede saltarse por prisa o descuido, y la corrección fue inmediata gracias al feedback 
+claro del pipeline. 
+4. Pueba de los comandos utilizados en bash 
+@dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $  source 
+/workspaces/SeminarioSanmateo/.venv/bin/actívate 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ cd 
+/workspaces/SeminarioSanmateo/fintech-nova-api 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cat 
+> test_main.py << 'EOF' 
+> from fastapi.testclient import TestClient 
+from main import app 
+ 
+client = TestClient(app) 
+ 
+ 
+class TestEndpointsBasicos: 
+    def test_status_operacional(self): 
+
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 15 de 21 
+        resp = client.get("/status") 
+        assert resp.status_code == 200 
+EOF     assert resp.json()["historial"] == "Limpio"00, "deudas": 1000},), 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cat 
+> requirements-dev.txt << 'EOF' 
+pytest==7.4.3 
+httpx==0.25.2 
+EOF 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ pip 
+install -r requirements-dev.txt 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 325.1/325.1 kB 12.8 MB/s eta 0:00:00 
+Downloading httpx-0.25.2-py3-none-any.whl (74 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 75.0/75.0 kB 17.1 MB/s eta 0:00:00 
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 78.8/78.8 kB 15.4 MB/s eta 0:00:00 
+Downloading pluggy-1.6.0-py3-none-any.whl (20 kB) 
+Downloading certifi-2026.6.17-py3-none-any.whl (133 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 133.3/133.3 kB 24.0 MB/s eta 0:00:00 
+Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB) 
+Downloading packaging-26.2-py3-none-any.whl (100 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 100.2/100.2 kB 10.0 MB/s eta 0:00:00 
+Downloading sniffio-1.3.1-py3-none-any.whl (10 kB) 
+Installing collected packages: sniffio, pluggy, packaging, iniconfig, certifi, pytest, httpcore, 
+httpx 
+Successfully installed certifi-2026.6.17 httpcore-1.0.9 httpx-0.25.2 iniconfig-2.3.0 
+packaging-26.2 pluggy-1.6.0 pytest-7.4.3 sniffio-1.3.1 
+ 
+[notice] A new release of pip is available: 23.2.1 -> 26.1.2 
+[notice] To update, run: pip install --upgrade pip 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ 
+pytest test_main.py -v 
+===================================================== test session starts 
+====================================================== 
+platform linux -- Python 3.12.1, pytest-7.4.3, pluggy-1.6.0 -- 
+/workspaces/SeminarioSanmateo/.venv/bin/python3 
+cachedir: .pytest_cache 
+rootdir: /workspaces/SeminarioSanmateo/fintech-nova-api 
+plugins: anyio-4.13.0 
+collected 7 items                                                                                                               
+ 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 16 de 21 
+test_main.py::TestEndpointsBasicos::test_status_operacional PASSED                                                       
+[ 14%] 
+test_main.py::TestEndpointsBasicos::test_health_responde PASSED                                                          
+[ 28%] 
+test_main.py::TestEvaluacionRiesgo::test_menor_de_edad_rechazado PASSED                                                  
+[ 42%] 
+test_main.py::TestEvaluacionRiesgo::test_score_alto_aprobado PASSED                                                      
+[ 57%] 
+test_main.py::TestEvaluacionRiesgo::test_score_bajo_en_revision PASSED                                                   
+[ 71%] 
+test_main.py::TestEvaluacionRiesgo::test_payload_invalido_retorna_422 PASSED                                             
+[ 85%] 
+test_main.py::TestDatosFinancieros::test_obtener_historial_cliente PASSED                                                
+[100%] 
+ 
+======================================================= warnings 
+summary ======================================================= 
+../.venv/lib/python3.12/site-packages/fastapi/testclient.py:1 
+  /workspaces/SeminarioSanmateo/.venv/lib/python3.12/site-
+packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with 
+`starlette.testclient` is deprecated; install `httpx2` instead. 
+    from starlette.testclient import TestClient as TestClient  # noqa 
+ 
+test_main.py::TestEndpointsBasicos::test_health_responde 
+  /workspaces/SeminarioSanmateo/fintech-nova-api/health_check.py:198: 
+DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal 
+in a future version. Use timezone-aware objects to represent datetimes in UTC: 
+datetime.datetime.now(datetime.UTC). 
+    "timestamp": datetime.utcnow().isoformat() + "Z", 
+ 
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html 
+================================================ 7 passed, 2 warnings in 
+1.25s ================================================= 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cd 
+/workspaces/SeminarioSanmateo 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ cat > 
+.github/workflows/ci-cd-pipeline.yml << 'EOF' 
+name: CI/CD Pipeline - FinTech Nova 
+ 
+on: 
+  push: 
+    branches: 
+      - main 
+  workflow_dispatch: 
+ 
+jobs: 
+  build-and-security: 
+EOF       docker stop fintech-test && docker rm fintech-testr logs fintech-test && exit 1) 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 17 de 21 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ git add fintech-
+nova-api/test_main.py fintech-nova-api/requirements-dev.txt .github/workflows/ci-cd-
+pipeline.yml 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ git commit -m "feat: 
+agregar pruebas automáticas (pytest) y smoke test al pipeline" 
+[main 6d1f838] feat: agregar pruebas automáticas (pytest) y smoke test al pipeline 
+ 3 files changed, 96 insertions(+), 31 deletions(-) 
+ create mode 100644 fintech-nova-api/test_main.py 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ git push origin main 
+Enumerating objects: 14, done. 
+Counting objects: 100% (14/14), done. 
+Delta compression using up to 2 threads 
+Compressing objects: 100% (5/5), done. 
+Writing objects: 100% (8/8), 1.71 KiB | 1.71 MiB/s, done. 
+Total 8 (delta 2), reused 0 (delta 0), pack-reused 0 (from 0) 
+remote: Resolving deltas: 100% (2/2), completed with 2 local objects. 
+To https://github.com/dftrianag-code/SeminarioSanmateo 
+   0eae00d..6d1f838  main -> main 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo (main) $ cd 
+/workspaces/SeminarioSanmateo/fintech-nova-api 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cp 
+requirements.txt requirements.txt.backup 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ 
+echo "requests==2.6.0" >> requirements.txt 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cat 
+requirements.txt 
+fastapi 
+uvicorn 
+psutil 
+pydantic 
+requests==2.6.0 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ pip 
+install pip-audit 
+Downloading pip_audit-2.10.1-py3-none-any.whl (62 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 62.0/62.0 kB 4.9 MB/s eta 0:00:00 
+Downloading cyclonedx_python_lib-11.11.0-py3-none-any.whl (528 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 528.7/528.7 kB 22.7 MB/s eta 0:00:00 
+Downloading pip_api-0.0.34-py3-none-any.whl (120 kB) 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 18 de 21 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 120.4/120.4 kB 25.2 MB/s eta 0:00:00 
+Downloading pip_requirements_parser-32.0.1-py3-none-any.whl (35 kB) 
+Downloading platformdirs-4.10.0-py3-none-any.whl (22 kB) 
+Downloading requests-2.34.2-py3-none-any.whl (73 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 73.1/73.1 kB 14.7 MB/s eta 0:00:00 
+Downloading rich-15.0.0-py3-none-any.whl (310 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 310.7/310.7 kB 23.6 MB/s eta 0:00:00 
+Downloading tomli-2.4.1-cp312-cp312-
+manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (253 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 253.3/253.3 kB 24.6 MB/s eta 0:00:00 
+Downloading tomli_w-1.2.0-py3-none-any.whl (6.7 kB) 
+Downloading charset_normalizer-3.4.7-cp312-cp312-
+manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (216 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 216.6/216.6 kB 8.6 MB/s eta 0:00:00 
+Downloading filelock-3.29.4-py3-none-any.whl (42 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 42.8/42.8 kB 2.3 MB/s eta 0:00:00 
+Downloading license_expression-30.4.4-py3-none-any.whl (120 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 120.6/120.6 kB 4.2 MB/s eta 0:00:00 
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 91.7/91.7 kB 11.1 MB/s eta 0:00:00 
+Downloading msgpack-1.2.1-cp312-cp312-
+manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (419 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 420.0/420.0 kB 17.0 MB/s eta 0:00:00 
+Downloading packageurl_python-0.17.6-py3-none-any.whl (36 kB) 
+Downloading py_serializable-2.1.0-py3-none-any.whl (23 kB) 
+Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 1.2/1.2 MB 30.8 MB/s eta 0:00:00 
+Downloading sortedcontainers-2.4.0-py2.py3-none-any.whl (29 kB) 
+Downloading urllib3-2.7.0-py3-none-any.whl (131 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 131.1/131.1 kB 12.0 MB/s eta 0:00:00 
+Downloading cachecontrol-0.14.4-py3-none-any.whl (22 kB) 
+Downloading pyparsing-3.3.2-py3-none-any.whl (122 kB) 
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━ 122.8/122.8 kB 13.5 MB/s eta 0:00:00 
+Downloading boolean_py-5.0-py3-none-any.whl (26 kB) 
+Downloading defusedxml-0.7.1-py2.py3-none-any.whl (25 kB) 
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB) 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 19 de 21 
+Installing collected packages: sortedcontainers, boolean.py, urllib3, tomli-w, tomli, 
+pyparsing, pygments, platformdirs, pip-api, packageurl-python, msgpack, mdurl, license-
+expression, filelock, defusedxml, charset_normalizer, requests, py-serializable, pip-
+requirements-parser, markdown-it-py, rich, cyclonedx-python-lib, CacheControl, pip-audit 
+Successfully installed CacheControl-0.14.4 boolean.py-5.0 charset_normalizer-3.4.7 
+cyclonedx-python-lib-11.11.0 defusedxml-0.7.1 filelock-3.29.4 license-expression-30.4.4 
+markdown-it-py-4.2.0 mdurl-0.1.2 msgpack-1.2.1 packageurl-python-0.17.6 pip-api-0.0.34 
+pip-audit-2.10.1 pip-requirements-parser-32.0.1 platformdirs-4.10.0 py-serializable-2.1.0 
+pygments-2.20.0 pyparsing-3.3.2 requests-2.34.2 rich-15.0.0 sortedcontainers-2.4.0 tomli-
+2.4.1 tomli-w-1.2.0 urllib3-2.7.0 
+ 
+[notice] A new release of pip is available: 23.2.1 -> 26.1.2 
+[notice] To update, run: pip install --upgrade pip 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ 
+pip-audit --requirement requirements.txt --format=columns 
+Found 6 known vulnerabilities in 1 package 
+Name     Version ID             Fix Versions 
+-------- ------- -------------- ------------ 
+requests 2.6.0   PYSEC-2018-28  2.20.0 
+requests 2.6.0   PYSEC-2023-74  2.31.0 
+requests 2.6.0   PYSEC-2023-74  2.31.0 
+requests 2.6.0   CVE-2024-35195 2.32.0 
+requests 2.6.0   CVE-2024-47081 2.32.4 
+requests 2.6.0   CVE-2026-25645 2.33.0 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+add requirements.txt 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+commit -m "test: introducir dependencia vulnerable (demo DevSecOps)" 
+[main 41497df] test: introducir dependencia vulnerable (demo DevSecOps) 
+ 1 file changed, 1 insertion(+) 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+push origin main 
+Enumerating objects: 7, done. 
+Counting objects: 100% (7/7), done. 
+Delta compression using up to 2 threads 
+Compressing objects: 100% (3/3), done. 
+Writing objects: 100% (4/4), 414 bytes | 414.00 KiB/s, done. 
+Total 4 (delta 2), reused 0 (delta 0), pack-reused 0 (from 0) 
+remote: Resolving deltas: 100% (2/2), completed with 2 local objects. 
+To https://github.com/dftrianag-code/SeminarioSanmateo 
+   6d1f838..41497df  main -> main 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cp 
+requirements.txt.backup requirements.txt 
+ 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 20 de 21 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ rm 
+requirements.txt.backup 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ cat 
+requirements.txt 
+fastapi 
+uvicorn 
+psutil 
+pydantic 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+add requirements.txt 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+commit -m "fix: eliminar dependencia vulnerable de prueba (demo DevSecOps)" 
+[main e3d1f57] fix: eliminar dependencia vulnerable de prueba (demo DevSecOps) 
+ 1 file changed, 1 deletion(-) 
+ 
+(.venv) @dftrianag-code ➜ /workspaces/SeminarioSanmateo/fintech-nova-api (main) $ git 
+push origin main 
+Enumerating objects: 7, done. 
+Counting objects: 100% (7/7), done. 
+Delta compression using up to 2 threads 
+Compressing objects: 100% (3/3), done. 
+Writing objects: 100% (4/4), 404 bytes | 404.00 KiB/s, done. 
+Total 4 (delta 2), reused 0 (delta 0), pack-reused 0 (from 0) 
+remote: Resolving deltas: 100% (2/2), completed with 2 local objects. 
+To https://github.com/dftrianag-code/SeminarioSanmateo 
+   41497df..e3d1f57  main -> main 
+ 
+5. Puntos Clave para la Sustentación 
+Guía de respuestas para explicar con dominio técnico las decisiones tomadas en este laboratorio 
+frente al panel evaluador. 
+• ¿Por qué el pipeline se activa solo con push a main? Porque main es la rama de producción; 
+las ramas de desarrollo pueden tener código en progreso que no debe pasar 
+automáticamente los controles de calidad. 
+• ¿Por qué se ejecuta pip-audit antes de construir la imagen Docker? Para aplicar el principio 
+Shift-Left: detectar vulnerabilidades en las dependencias lo antes posible en el ciclo, evitando 
+construir y desplegar una imagen insegura. 
+• ¿Qué pasaría si una dependencia tuviera una vulnerabilidad conocida? pip-audit devolvería 
+un código de salida distinto de cero, GitHub Actions marcaría ese paso como fallido, y el 
+pipeline se detendría antes de llegar a las pruebas y a la construcción de la imagen Docker. 
+Esto fue demostrado en la prueba controlada de la sección 3. 
+• ¿Por qué se agregaron pruebas automáticas (pytest) además de la auditoría de seguridad? 
+La auditoría revisa vulnerabilidades en las dependencias externas, pero no garantiza que la 
+
+FinTech Nova — Proyecto Final Integrador Entregable Laboratorio 4 
+Página 21 de 21 
+lógica de negocio funcione correctamente. pytest valida que las reglas de evaluación de 
+riesgo (rechazo a menores de edad, aprobación por score, validación de payloads) sigan 
+comportándose como se espera ante cualquier cambio futuro en el código. 
+• ¿Por qué se agregó un smoke test después de construir la imagen Docker? Porque que la 
+imagen se construya sin errores no garantiza que la aplicación arranque correctamente 
+dentro del contenedor. El smoke test ejecuta la imagen real y consulta un endpoint para 
+confirmar que el servicio efectivamente responde antes de considerarlo listo para desplegar. 
+• ¿Por qué la imagen Docker se etiqueta con ${{ github.sha }}? Para tener trazabilidad exacta 
+entre cada imagen construida y el commit de código que la originó, lo que permite hacer 
+rollback a una versión anterior específica si algo falla en producción. 
+• ¿Qué corregimos respecto a la primera versión del workflow? Se eliminó una duplicación 
+accidental de las claves on y jobs (que invalidaba el archivo YAML) y se corrigieron las rutas 
+de requirements.txt y del contexto de build, ya que el código de la API vive en la subcarpeta 
+fintech-nova-api/. 
+6. Conclusiones 
+• El pipeline se activa automáticamente en cada push a main, sin intervención manual, 
+cumpliendo el principio de integración continua. 
+• La auditoría de seguridad con pip-audit actúa como un control automático que bloquea 
+dependencias vulnerables antes de llegar a producción (Shift-Left), comprobado mediante 
+una prueba controlada. 
+• La suite de pruebas con pytest valida automáticamente la lógica de negocio del motor de 
+riesgo en cada cambio, evitando regresiones. 
+• El smoke test confirma que la imagen Docker no solo se construye, sino que efectivamente 
+arranca y responde correctamente. 
+• La imagen Docker generada queda etiquetada con el SHA del commit, permitiendo 
+trazabilidad exacta entre código e imagen, y facilitando un rollback inmediato si fuera 
+necesario. 
+• Con este laboratorio se completa la última capa de madurez del proyecto: el código de 
+FinTech Nova ahora se valida, audita, prueba y empaqueta automáticamente antes de 
+cualquier despliegue. 
+ 
+7. Anexos 
+Repositorio GitHub https://github.com/dftrianag-code/SeminarioSanmateo  
+Pestaña Actions https://github.com/dftrianag-code/SeminarioSanmateo/actions  
+Workflow .github/workflows/ci-cd-pipeline.yml 
+ 
